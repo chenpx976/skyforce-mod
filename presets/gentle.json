@@ -1,0 +1,25 @@
+{
+  // 轻度：大约原版 2 倍节奏，几乎不破坏养成曲线。
+  // 适合想保留「刷」的乐趣、只是嫌原版太磨人的情况。
+  "card": {
+    "dropMultiplier": 2.0,
+    "luckBias": 0.85,
+    "luckFromBadLuck": 0.15,
+    "maxLuckFromBadLuck": 0.7,
+    "luckFromEmptyRuns": 0.02,
+    "maxLuckFromEmptyRuns": 0.7,
+    "maxRunsWithoutDrop": 15
+  },
+  "skin": {
+    "dropMultiplier": 2.0,
+    "luckBias": 0.85,
+    "luckFromBadLuck": 0.15,
+    "maxLuckFromBadLuck": 0.7,
+    "luckFromEmptyRuns": 0.02,
+    "maxLuckFromEmptyRuns": 0.7,
+    "maxRunsWithoutDrop": 20
+  },
+  "stars": {
+    "multiplier": 1.25
+  }
+}

@@ -1,0 +1,25 @@
+{
+  // 推荐：每 2~4 局稳定出一张卡，稀有卡明显更容易进候选池。
+  // 星星 1.5x 让升级不那么卡，但不至于一轮就买空机库。
+  "card": {
+    "dropMultiplier": 3.0,
+    "luckBias": 0.7,
+    "luckFromBadLuck": 0.2,
+    "maxLuckFromBadLuck": 0.8,
+    "luckFromEmptyRuns": 0.05,
+    "maxLuckFromEmptyRuns": 0.85,
+    "maxRunsWithoutDrop": 4
+  },
+  "skin": {
+    "dropMultiplier": 3.5,
+    "luckBias": 0.7,
+    "luckFromBadLuck": 0.2,
+    "maxLuckFromBadLuck": 0.8,
+    "luckFromEmptyRuns": 0.05,
+    "maxLuckFromEmptyRuns": 0.85,
+    "maxRunsWithoutDrop": 5
+  },
+  "stars": {
+    "multiplier": 1.5
+  }
+}

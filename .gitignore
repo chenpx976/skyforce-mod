@@ -1,0 +1,14 @@
+# 构建产物
+build/
+tools/SkyForcePatcher/bin/
+tools/SkyForcePatcher/obj/
+
+# 游戏原始文件（体积大 / 版权）
+assets/Assembly-CSharp.dll.orig
+research/assets/
+
+# 反编译产物与本地存档（分析用，不入库）
+research/decompiled/
+research/save/
+
+.DS_Store

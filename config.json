@@ -1,0 +1,25 @@
+{
+  // 冲刺：专门用来补齐缺卡。基本 1~2 局一张，限时卡会频繁刷新，
+  // 建议等卡片集齐后切回 balanced / gentle。
+  "card": {
+    "dropMultiplier": 6.0,
+    "luckBias": 0.55,
+    "luckFromBadLuck": 0.3,
+    "maxLuckFromBadLuck": 0.95,
+    "luckFromEmptyRuns": 0.1,
+    "maxLuckFromEmptyRuns": 0.95,
+    "maxRunsWithoutDrop": 2
+  },
+  "skin": {
+    "dropMultiplier": 5.0,
+    "luckBias": 0.6,
+    "luckFromBadLuck": 0.3,
+    "maxLuckFromBadLuck": 0.95,
+    "luckFromEmptyRuns": 0.1,
+    "maxLuckFromEmptyRuns": 0.95,
+    "maxRunsWithoutDrop": 3
+  },
+  "stars": {
+    "multiplier": 2.0
+  }
+}
