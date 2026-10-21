@@ -23,7 +23,7 @@ internal static class Program
                 ReadingMode = ReadingMode.Immediate,
             });
 
-            var applied = Patcher.Apply(module, config);
+            var applied = Patcher.Apply(module, config, options.HelperPath);
 
             if (applied.Count == 0)
             {
@@ -60,16 +60,16 @@ internal static class Program
     {
         Console.Error.WriteLine("""
                                 用法:
-                                  skyforce-patcher --input <Assembly-CSharp.dll> --output <out.dll> --config <config.json>
+                                  skyforce-patcher --input <Assembly-CSharp.dll> --output <out.dll> --config <config.json> [--helper <SkyForceTweaks.dll>]
                                 """);
     }
 }
 
-internal sealed record CliOptions(string InputPath, string OutputPath, string ConfigPath)
+internal sealed record CliOptions(string InputPath, string OutputPath, string ConfigPath, string? HelperPath)
 {
     public static CliOptions? Parse(string[] args)
     {
-        string? input = null, output = null, config = null;
+        string? input = null, output = null, config = null, helper = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -84,11 +84,14 @@ internal sealed record CliOptions(string InputPath, string OutputPath, string Co
                 case "--config" when i + 1 < args.Length:
                     config = args[++i];
                     break;
+                case "--helper" when i + 1 < args.Length:
+                    helper = args[++i];
+                    break;
             }
         }
 
         return input is not null && output is not null && config is not null
-            ? new CliOptions(input, output, config)
+            ? new CliOptions(input, output, config, helper)
             : null;
     }
 }

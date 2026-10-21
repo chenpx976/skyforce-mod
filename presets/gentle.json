@@ -21,5 +21,9 @@
   },
   "stars": {
     "multiplier": 1.25
+  },
+  "revive": {
+    "enabled": true,
+    "perStage": 1
   }
 }

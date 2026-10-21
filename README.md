@@ -1,9 +1,12 @@
-# Sky Force Reloaded 几率 Mod
+# Sky Force Reloaded Mod
 
-对 Steam 版 *Sky Force Reloaded*（AppID `667600`）的 `Assembly-CSharp.dll` 做**静态 IL 注入**，
-把「掉落概率 / 稀有度 / 幸运补偿 / 星星倍率」这些原本写死在场景资源里的数值变成可调的。
+对 Steam 版 *Sky Force Reloaded*（AppID `667600`）做**静态 IL 注入 + 独立 helper 程序集**：
 
-不改存档、不装 BepInEx、不引入任何运行时依赖——补丁只是往方法体里插几条算术指令。
+- **几率调整**：掉落概率 / 稀有度 / 幸运补偿 / 星星倍率（纯 IL，往方法体里插几条算术指令）
+- **死亡复活**：死亡弹窗让你选「复活」或「放弃」，复活时满血 + 能量护盾 + 2.5 秒无敌
+- **右上角 HUD**：常显当前生效的参数
+
+不装 BepInEx、不需要启动项、不改存档。
 
 ## 为什么重写
 
@@ -39,6 +42,34 @@ vim config.json      # 调参数
 - 不需要 `WINEDLLOVERRIDES=...` 之类的启动选项——这里没有 DLL 代理注入，游戏本来就会加载自己的 `Assembly-CSharp.dll`。
 - 只有两种情况会覆盖补丁：手动「验证游戏文件完整性」、或 Valve 真的推送了新 build（`buildid` 变化）。后者跑一次 `./apply.sh --refresh && ./apply.sh` 即可。
 - Steam 下载页里那种「验证/更新中」如果只有几 MB 且进度很慢，通常是**着色器预缓存**（`Shader update`），与游戏文件无关，可以放心取消。
+
+## 死亡复活弹窗
+
+死亡时 `Time.timeScale = 0` 冻结全场，屏幕中央弹出：
+
+```
+┌──────────────────────────────────┐
+│        SHIP DESTROYED            │
+│        Revives left: 3           │
+│   ┌──────────┐  ┌──────────┐    │
+│   │ REVIVE(A)│  │ GIVE UP(B)│   │
+│   └──────────┘  └──────────┘    │
+└──────────────────────────────────┘
+```
+
+- 操作：触摸点按钮 / 手柄 A、B / 键盘 Enter、Esc；30 秒不选自动放弃
+- 复活内容：满血、单发/双发武器恢复、**能量护盾**（`ActivateOnce(bLuckyShield: true)`，不消耗存档槽位）、
+  切回 `FLYING` 后再 2.5 秒无敌
+- 放弃：恢复时间流速后走游戏原本的 `Stage.EvGameOver()`
+- 每局次数由 `config.json` 的 `revive.perStage` 决定，开局时（`Stage.EvStartGame`）重置
+
+实现上踩过三个坑，都在 helper 里修掉了：
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| 冻结后永远不恢复 | 依赖协程去恢复 `timeScale`，协程没跑起来 | 改由 `CardsManager.OnGUI` 每帧驱动（OnGUI 不受 `timeScale` 影响） |
+| 复活后吃不到任何东西 | `EvShipDestroyed` 末尾 `_Players.Remove(this)`，而 `Bonus.OnTriggerEnter` 靠遍历 `_Players` 找玩家 | 复活时反射调 `LaunchPlayerCreatedEvent()` 重新登记 |
+| 复活后不能开枪 | 死亡时把武器 **GameObject** `SetActive(false)`，而 `EnableWeapons()` 只改 `m_bActive` 字段 | 反射拿 `weapons_dictionary`，精确恢复 GameObject |
 
 ## 右上角 HUD
 
@@ -92,6 +123,8 @@ python3 research/decode_save.py research/save/SaveGame.dat | grep CCard
 | `maxLuckFromEmptyRuns` | 上述补偿的上限 | 0.6 |
 | `maxRunsWithoutDrop` | 连续多少局没掉落就强制必出 | 100 |
 | `stars.multiplier` | 敌人 / 星星发生器掉落的星星数量倍率 | 1 |
+| `revive.enabled` | 是否启用死亡复活弹窗 | — |
+| `revive.perStage` | 每局可复活次数 | — |
 
 ## 补丁点
 
@@ -104,6 +137,11 @@ python3 research/decode_save.py research/save/SaveGame.dat | grep CCard
 | 幸运参数 | `CardsManager.Awake` / `SkinsManager.Awake` | 末尾直接 `stfld` 覆盖 5 个幸运字段 |
 | 星星倍率 | `Enemy.GetStartNo` / `StarsGenerator.GetStartNo` | 每个 `Mathf.FloorToInt` 前 `* mult` |
 | 旧 mod 停用 | `TCard.Start` | 方法体替换为空 `ret` |
+| HUD | `CardsManager`（新增方法） | 追加 `private void OnGUI()` |
+| 复活弹窗 | 同上 `OnGUI` 末尾 | `call Hooks.OnGuiTick()` |
+| 死亡拦截 | `Stage.onPlayerDestroyed` 开头 | `if (Hooks.OnPlayerDestroyed(this, player)) return;` |
+| 每局重置 | `Stage.EvStartGame` 末尾 | `call Hooks.ResetStage()` |
+| helper 探针 | `CardsManager.Awake` 末尾 | `call Hooks.OnGameBoot()` |
 
 补丁靠**指令模式匹配**定位，所以对原版 dll 和已被旧 mod 改过的 dll 都能打；
 任何一处锚点找不到会直接报错退出，不会产出半截 dll。
@@ -113,14 +151,29 @@ python3 research/decode_save.py research/save/SaveGame.dat | grep CCard
 ```
 skyforce-mod/
 ├── config.json                     # 你调的就是这个
-├── apply.sh / restore.sh
-├── assets/Assembly-CSharp.dll.orig # 基线（--refresh 可更新）
+├── presets/                        # gentle / balanced / sprint 三档预设
+├── apply.sh / restore.sh / fetch.sh
+├── build-helper.sh                 # 从 config.json 生成常量并编译 SkyForceTweaks.dll
+├── assets/                         # 基线 dll + UnityEngine.dll（fetch.sh 拉取）
 ├── build/                          # 打补丁产物
 ├── tools/
 │   ├── vendor/                     # Mono.Cecil / Mono.Cecil.Rocks
-│   └── SkyForcePatcher/            # 打补丁器（.NET 7 控制台）
-└── research/decompiled/            # 游戏 Assembly-CSharp 反编译结果（分析用）
+│   ├── SkyForcePatcher/            # 打补丁器（.NET 7 控制台）
+│   └── Helper/Hooks.cs             # 独立 helper 程序集（复活弹窗、护盾、武器恢复）
+└── research/
+    ├── decompiled/                 # 游戏 Assembly-CSharp 反编译结果（分析用）
+    └── decode_save.py              # 存档解码
 ```
+
+部署后 `Managed/` 下会有两个文件：`Assembly-CSharp.dll`（打过补丁）+ `SkyForceTweaks.dll`（helper）。
+`restore.sh` 会同时还原前者、删除后者。
+
+### 为什么需要独立 helper 程序集
+
+弹窗需要状态机（冻结 → 等输入 → 复活/放弃），用 Cecil 逐条手写 IL 不现实。
+所以逻辑写成普通 C#，编译成 `SkyForceTweaks.dll`（net35 / mono 2.0 profile，引用 `UnityEngine.dll` + `Assembly-CSharp.dll`），
+Cecil 只在 `Assembly-CSharp` 里插**一行 `call` + `brtrue`**。
+mono 会从 `Managed/` 目录解析这个程序集（已实测可行，日志会打印 `[SFTweaks] helper loaded`）。
 
 ## 注意
 

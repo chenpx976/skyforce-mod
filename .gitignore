@@ -12,3 +12,5 @@ research/decompiled/
 research/save/
 
 .DS_Store
+assets/UnityEngine.dll
+tools/Helper/GeneratedConfig.cs

@@ -14,8 +14,20 @@ namespace SkyForcePatcher;
 /// </summary>
 internal static class Patcher
 {
-    public static List<string> Apply(ModuleDefinition module, ModConfig config)
+    private const string MarkerTypeName = "SkyForceTweaks.PatchedMarker";
+
+    // helper 程序集的 Hooks 类型与方法（未启用 helper 时为 null）
+    private static TypeReference? helperTypeRef;
+    private static MethodReference? tickMethod;
+
+    public static List<string> Apply(ModuleDefinition module, ModConfig config, string? helperPath = null)
     {
+        // 防重复打补丁：倍率是乘法，打两次会变成 x36。
+        if (module.GetType(MarkerTypeName) is not null)
+        {
+            throw new PatchException("输入 dll 已经打过补丁（存在 SkyForceTweaks.PatchedMarker）。请用原版 dll 作基线，或先 ./restore.sh。");
+        }
+
         var applied = new List<string>();
 
         PatchCardDropRate(module, config.Card, applied);
@@ -23,7 +35,19 @@ internal static class Patcher
         PatchLuckSettings(module, config, applied);
         PatchStars(module, config.Stars, applied);
         DisableLegacyCardMod(module, applied);
+
+        // 先注册 helper，HUD 的 OnGUI 里要顺带挂上复活弹窗的每帧回调。
+        if (!string.IsNullOrEmpty(helperPath))
+        {
+            PatchHelperHooks(module, helperPath!, config, applied);
+        }
+
         PatchHud(module, config, applied);
+
+        if (applied.Count > 0)
+        {
+            AddPatchMarker(module);
+        }
 
         return applied;
     }
@@ -314,7 +338,8 @@ internal static class Patcher
             type.Methods.Remove(existing);
         }
 
-        if (!config.Hud.Enabled)
+        var hudEnabled = config.Hud.Enabled;
+        if (!hudEnabled && helperTypeRef is null)
         {
             applied.Add("HUD 已关闭");
             return;
@@ -323,7 +348,7 @@ internal static class Patcher
         var text = string.IsNullOrWhiteSpace(config.Hud.Label)
             ? BuildHudText(config)
             : config.Hud.Label!;
-        if (text.Any(c => c > 0x7F))
+        if (hudEnabled && text.Any(c => c > 0x7F))
         {
             throw new PatchException("hud.label 只能使用 ASCII：Unity 内置 GUI 字体没有中文字形，会显示成方块");
         }
@@ -392,55 +417,64 @@ internal static class Patcher
 
         var il = body.GetILProcessor();
 
-        // GUI.skin.label.fontSize = 13;
-        il.Emit(OpCodes.Call, getSkin);
-        il.Emit(OpCodes.Callvirt, getLabelStyle);
-        il.Emit(OpCodes.Ldc_I4, (int)fontSize);
-        il.Emit(OpCodes.Callvirt, setFontSize);
+        if (hudEnabled)
+        {
+            // GUI.skin.label.fontSize = 13;
+            il.Emit(OpCodes.Call, getSkin);
+            il.Emit(OpCodes.Callvirt, getLabelStyle);
+            il.Emit(OpCodes.Ldc_I4, (int)fontSize);
+            il.Emit(OpCodes.Callvirt, setFontSize);
 
-        // GUI.skin.label.normal.textColor = new Color(1f, 0.95f, 0.45f, 1f);
-        il.Emit(OpCodes.Call, getSkin);
-        il.Emit(OpCodes.Callvirt, getLabelStyle);
-        il.Emit(OpCodes.Callvirt, getNormal);
-        il.Emit(OpCodes.Ldc_R4, 1f);
-        il.Emit(OpCodes.Ldc_R4, 0.95f);
-        il.Emit(OpCodes.Ldc_R4, 0.45f);
-        il.Emit(OpCodes.Ldc_R4, 1f);
-        il.Emit(OpCodes.Newobj, colorCtor);
-        il.Emit(OpCodes.Callvirt, setTextColor);
+            // GUI.skin.label.normal.textColor = new Color(1f, 0.95f, 0.45f, 1f);
+            il.Emit(OpCodes.Call, getSkin);
+            il.Emit(OpCodes.Callvirt, getLabelStyle);
+            il.Emit(OpCodes.Callvirt, getNormal);
+            il.Emit(OpCodes.Ldc_R4, 1f);
+            il.Emit(OpCodes.Ldc_R4, 0.95f);
+            il.Emit(OpCodes.Ldc_R4, 0.45f);
+            il.Emit(OpCodes.Ldc_R4, 1f);
+            il.Emit(OpCodes.Newobj, colorCtor);
+            il.Emit(OpCodes.Callvirt, setTextColor);
 
-        // GUI.skin.label.alignment = TextAnchor.MiddleRight;  // 5
-        il.Emit(OpCodes.Call, getSkin);
-        il.Emit(OpCodes.Callvirt, getLabelStyle);
-        il.Emit(OpCodes.Ldc_I4, 5);
-        il.Emit(OpCodes.Callvirt, setAlignment);
+            // GUI.skin.label.alignment = TextAnchor.MiddleRight;  // 5
+            il.Emit(OpCodes.Call, getSkin);
+            il.Emit(OpCodes.Callvirt, getLabelStyle);
+            il.Emit(OpCodes.Ldc_I4, 5);
+            il.Emit(OpCodes.Callvirt, setAlignment);
 
-        // var x = Screen.width - (rightMargin + boxWidth);
-        il.Emit(OpCodes.Call, screenWidth);
-        il.Emit(OpCodes.Conv_R4);
-        il.Emit(OpCodes.Ldc_R4, rightMargin + boxWidth);
-        il.Emit(OpCodes.Sub);
-        il.Emit(OpCodes.Stloc, x);
+            // var x = Screen.width - (rightMargin + boxWidth);
+            il.Emit(OpCodes.Call, screenWidth);
+            il.Emit(OpCodes.Conv_R4);
+            il.Emit(OpCodes.Ldc_R4, rightMargin + boxWidth);
+            il.Emit(OpCodes.Sub);
+            il.Emit(OpCodes.Stloc, x);
 
-        // GUI.Box(new Rect(x, top, boxWidth, boxHeight), "");
-        il.Emit(OpCodes.Ldloc, x);
-        il.Emit(OpCodes.Ldc_R4, top);
-        il.Emit(OpCodes.Ldc_R4, boxWidth);
-        il.Emit(OpCodes.Ldc_R4, boxHeight);
-        il.Emit(OpCodes.Newobj, rectCtor);
-        il.Emit(OpCodes.Ldstr, string.Empty);
-        il.Emit(OpCodes.Call, box);
+            // GUI.Box(new Rect(x, top, boxWidth, boxHeight), "");
+            il.Emit(OpCodes.Ldloc, x);
+            il.Emit(OpCodes.Ldc_R4, top);
+            il.Emit(OpCodes.Ldc_R4, boxWidth);
+            il.Emit(OpCodes.Ldc_R4, boxHeight);
+            il.Emit(OpCodes.Newobj, rectCtor);
+            il.Emit(OpCodes.Ldstr, string.Empty);
+            il.Emit(OpCodes.Call, box);
 
-        // GUI.Label(new Rect(x + 8f, top + 6f, labelWidth, labelHeight), text);
-        il.Emit(OpCodes.Ldloc, x);
-        il.Emit(OpCodes.Ldc_R4, 8f);
-        il.Emit(OpCodes.Add);
-        il.Emit(OpCodes.Ldc_R4, top + 6f);
-        il.Emit(OpCodes.Ldc_R4, labelWidth);
-        il.Emit(OpCodes.Ldc_R4, labelHeight);
-        il.Emit(OpCodes.Newobj, rectCtor);
-        il.Emit(OpCodes.Ldstr, text);
-        il.Emit(OpCodes.Call, label);
+            // GUI.Label(new Rect(x + 8f, top + 6f, labelWidth, labelHeight), text);
+            il.Emit(OpCodes.Ldloc, x);
+            il.Emit(OpCodes.Ldc_R4, 8f);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Ldc_R4, top + 6f);
+            il.Emit(OpCodes.Ldc_R4, labelWidth);
+            il.Emit(OpCodes.Ldc_R4, labelHeight);
+            il.Emit(OpCodes.Newobj, rectCtor);
+            il.Emit(OpCodes.Ldstr, text);
+            il.Emit(OpCodes.Call, label);
+        }
+
+        // 复活弹窗：由 helper 每帧驱动（OnGUI 不受 timeScale 影响）。
+        if (helperTypeRef is not null)
+        {
+            il.Emit(OpCodes.Call, tickMethod);
+        }
 
         il.Emit(OpCodes.Ret);
 
@@ -455,7 +489,114 @@ internal static class Patcher
                + $"stars x{config.Stars.Multiplier:0.##}";
     }
 
+    // ── helper 程序集钩子 ──────────────────────────────────────────────────
+
+    private static void PatchHelperHooks(ModuleDefinition module, string helperPath, ModConfig config, List<string> applied)
+    {
+        if (!File.Exists(helperPath))
+        {
+            throw new PatchException($"找不到 helper 程序集: {helperPath}");
+        }
+
+        // 让 Assembly-CSharp 引用 Managed/ 下的 SkyForceTweaks.dll
+        var helperRef = module.AssemblyReferences.FirstOrDefault(r => r.Name == "SkyForceTweaks");
+        if (helperRef is null)
+        {
+            helperRef = new AssemblyNameReference("SkyForceTweaks", new Version(0, 0, 0, 0));
+            module.AssemblyReferences.Add(helperRef);
+        }
+
+        var stageType = module.GetType("Stage") ?? throw new PatchException("找不到类型 Stage");
+        var playerType = module.GetType("Player") ?? throw new PatchException("找不到类型 Player");
+
+        var helperType = new TypeReference("SkyForceTweaks", "Hooks", module, helperRef);
+
+        // 启动探针：CardsManager.Awake 末尾调一次，确认程序集真的被 mono 加载了。
+        var cardsManager = module.GetType("CardsManager")
+                           ?? throw new PatchException("找不到类型 CardsManager");
+        var awake = cardsManager.Methods.FirstOrDefault(m => m.Name == "Awake" && m.HasBody)
+                    ?? throw new PatchException("找不到 CardsManager.Awake");
+        var bootHook = new MethodReference("OnGameBoot", module.TypeSystem.Void, helperType) { HasThis = false };
+
+        // 每局开始时重置复活次数
+        var evStartGame = stageType.Methods.FirstOrDefault(m => m.Name == "EvStartGame" && m.HasBody);
+        if (evStartGame is not null)
+        {
+            var resetHook = new MethodReference("ResetStage", module.TypeSystem.Void, helperType) { HasThis = false };
+            var startBody = BeginEdit(evStartGame);
+            try
+            {
+                var startIl = startBody.GetILProcessor();
+                var startExit = startBody.Instructions.Last(i => i.OpCode == OpCodes.Ret);
+                startIl.InsertBefore(startExit, Instruction.Create(OpCodes.Call, resetHook));
+                applied.Add("helper hook: Stage.EvStartGame → ResetStage");
+            }
+            finally
+            {
+                EndEdit(evStartGame);
+            }
+        }
+
+        helperTypeRef = helperType;
+        tickMethod = new MethodReference("OnGuiTick", module.TypeSystem.Void, helperType) { HasThis = false };
+
+        var awakeBody = BeginEdit(awake);
+        try
+        {
+            var bootIl = awakeBody.GetILProcessor();
+            var awakeExit = awakeBody.Instructions.Last(i => i.OpCode == OpCodes.Ret);
+            bootIl.InsertBefore(awakeExit, Instruction.Create(OpCodes.Call, bootHook));
+            applied.Add("helper boot probe: CardsManager.Awake");
+        }
+        finally
+        {
+            EndEdit(awake);
+        }
+
+        var hookMethod = new MethodReference("OnPlayerDestroyed", module.TypeSystem.Boolean, helperType)
+        {
+            HasThis = false,
+        };
+        hookMethod.Parameters.Add(new ParameterDefinition(stageType));
+        hookMethod.Parameters.Add(new ParameterDefinition(playerType));
+
+        // private void onPlayerDestroyed(Player player)
+        var target = stageType.Methods.FirstOrDefault(m => m.Name == "onPlayerDestroyed" && m.HasBody)
+                     ?? throw new PatchException("找不到 Stage.onPlayerDestroyed");
+
+        var body = BeginEdit(target);
+        try
+        {
+            var il = body.GetILProcessor();
+            var first = body.Instructions[0];
+            var exit = body.Instructions.Last(i => i.OpCode == OpCodes.Ret);
+
+            // if (Hooks.OnPlayerDestroyed(this, player)) return;
+            il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_0));
+            il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg, target.Parameters[0]));
+            il.InsertBefore(first, Instruction.Create(OpCodes.Call, hookMethod));
+            il.InsertBefore(first, Instruction.Create(OpCodes.Brtrue, exit));
+
+            applied.Add($"helper hook: Stage.onPlayerDestroyed → {Path.GetFileName(helperPath)}");
+        }
+        finally
+        {
+            EndEdit(target);
+        }
+    }
+
     // ── 工具方法 ────────────────────────────────────────────────────────────
+
+    private static void AddPatchMarker(ModuleDefinition module)
+    {
+        var marker = new TypeDefinition(
+            "SkyForceTweaks",
+            "PatchedMarker",
+            TypeAttributes.NotPublic | TypeAttributes.Abstract | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit,
+            module.TypeSystem.Object);
+
+        module.Types.Add(marker);
+    }
 
     private static MethodDefinition FindMethod(ModuleDefinition module, string typeName, string methodName)
     {

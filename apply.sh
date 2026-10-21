@@ -8,7 +8,9 @@ set -euo pipefail
 
 DECK="${DECK:-deck@192.168.1.28}"
 GAME_DIR="${GAME_DIR:-/home/deck/.local/share/Steam/steamapps/common/Sky Force Reloaded}"
-REMOTE_DLL="$GAME_DIR/Sky Force Reloaded_Data/Managed/Assembly-CSharp.dll"
+REMOTE_MANAGED="$GAME_DIR/Sky Force Reloaded_Data/Managed"
+REMOTE_DLL="$REMOTE_MANAGED/Assembly-CSharp.dll"
+REMOTE_HELPER="$REMOTE_MANAGED/SkyForceTweaks.dll"
 REMOTE_HOME="${REMOTE_HOME:-/home/deck/.skyforce-mod}"
 REMOTE_BACKUP="$REMOTE_HOME/backup"
 
@@ -77,15 +79,19 @@ if [ "$DRY_RUN" = 0 ]; then
     else echo '   备份已存在，跳过'; fi"
 fi
 
-# 2. 构建 patcher
+# 2. 构建 patcher + helper
 echo "→ 构建 patcher…"
 dotnet build tools/SkyForcePatcher/SkyForcePatcher.csproj -c Release -v q --nologo > /dev/null
+
+echo "→ 编译 helper…"
+./build-helper.sh > /dev/null
 
 # 3. 打补丁
 echo "→ 应用补丁…"
 mkdir -p build
 dotnet tools/SkyForcePatcher/bin/Release/net7.0/skyforce-patcher.dll \
-  --input "$BASELINE" --output "$PATCHED" --config "$CONFIG"
+  --input "$BASELINE" --output "$PATCHED" --config "$CONFIG" \
+  --helper build/SkyForceTweaks.dll
 
 if [ "$DRY_RUN" = 1 ]; then
   echo "→ dry-run：补丁文件在 ${PATCHED}，未上传"
@@ -93,7 +99,7 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 # 4. 检查游戏是否在运行（Thermal: proton 进程名带 exe）
-if ssh "$DECK" "pgrep -f 'Sky Force Reloaded.exe' > /dev/null"; then
+if ssh "$DECK" "pgrep -f '[S]ky Force Reloaded.exe' > /dev/null"; then
   echo "⚠ 检测到游戏正在运行，请先退出游戏再重试。" >&2
   exit 1
 fi
@@ -101,6 +107,7 @@ fi
 # 5. 上传 dll + 配置留档
 echo "→ 上传到 Deck…"
 ssh "$DECK" "cat > '$REMOTE_DLL'" < "$PATCHED"
+ssh "$DECK" "cat > '$REMOTE_HELPER'" < build/SkyForceTweaks.dll
 ssh "$DECK" "mkdir -p '$REMOTE_HOME' && cat > '$REMOTE_HOME/config.last.json'" < "$CONFIG"
 
 echo
