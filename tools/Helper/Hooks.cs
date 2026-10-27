@@ -71,6 +71,7 @@ namespace SkyForceTweaks
         public static void OnGuiTick()
         {
             TickProtection();
+            RefillHotkey.Tick(s_PromptActive);
 
             if (!s_PromptActive)
             {

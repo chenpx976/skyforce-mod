@@ -394,7 +394,7 @@ internal static class Patcher
         textAnchor.IsValueType = true;
         var setAlignment = Instance("GUIStyle", "set_alignment", voidType, textAnchor);
 
-        // 右对齐、贴右下角。宽度按最长一行估（Arial 13px 约 7.4px/字符）。
+        // 右对齐、贴右上角顶边。宽度按最长一行估（Arial 13px 约 7.4px/字符）。
         const float fontSize = 13f;
         var lines = text.Split('\n');
         var maxChars = lines.Max(line => line.Length);
@@ -403,7 +403,7 @@ internal static class Patcher
         var boxHeight = 12f + lines.Length * 22f;
         var labelHeight = lines.Length * 22f;
         const float rightMargin = 6f;
-        const float top = 26f;
+        const float top = 0f;
 
         var method = new MethodDefinition("OnGUI",
             MethodAttributes.Private | MethodAttributes.HideBySig, voidType);
